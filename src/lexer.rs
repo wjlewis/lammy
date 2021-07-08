@@ -166,7 +166,7 @@ impl<'a> Lexer<'a> {
 
     fn is_name_continue(c: char) -> bool {
         match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '*' | '+' | '\'' => true,
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '*' | '+' | '\'' | '?' => true,
             _ => false,
         }
     }
