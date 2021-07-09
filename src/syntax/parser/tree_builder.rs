@@ -1,9 +1,11 @@
 use super::untyped_tree::{SyntaxKind as Sk, UntypedTree};
 use crate::errors::SimpleError;
-use crate::source::Span;
+use crate::source::{Source, SourceInfo};
 use crate::syntax::lexer::{Lexer, Token, TokenKind as Tk};
+use std::rc::Rc;
 
 pub struct TreeBuilder<'a> {
+    source: Rc<Source>,
     tokens: Lexer<'a>,
     wip: Vec<Entry>,
     errors: Vec<SimpleError>,
@@ -16,18 +18,17 @@ pub struct ParseResult {
     pub errors: Vec<SimpleError>,
 }
 
-impl<'a> From<&'a str> for TreeBuilder<'a> {
-    fn from(source: &'a str) -> Self {
-        Self {
-            tokens: Lexer::from(source),
+impl<'a> TreeBuilder<'a> {
+    pub fn new(source: &'a Rc<Source>) -> Self {
+        TreeBuilder {
+            source: Rc::clone(source),
+            tokens: Lexer::new(source),
             wip: Vec::new(),
             errors: Vec::new(),
             pos: 0,
         }
     }
-}
 
-impl<'a> TreeBuilder<'a> {
     pub fn take(mut self) -> ParseResult {
         match self.wip.pop() {
             None => panic!("no tree to take"),
@@ -52,25 +53,26 @@ impl<'a> TreeBuilder<'a> {
         self.skip_trivia();
         let peek = self.tokens.peek();
         let kind = peek.kind;
-        let span = peek.span;
+        let info = peek.info.clone();
         match kind {
             Tk::Alias | Tk::Name if self.starts_def() => self.parse_def(),
             Tk::Equals => self.parse_def(),
             Tk::Name | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => self.parse_tms(),
-            _ => self.error("expected a definition or term before this", span),
+            _ => self.error("expected a definition or term before this", info),
         }
 
         self.skip_trivia();
-        let start = self.tokens.peek().span.start;
-        let end = loop {
+        let start_info = self.tokens.peek().info.clone();
+        let end_info = loop {
             let peek = self.tokens.peek();
             match peek.kind {
-                Tk::Eof => break peek.span.end,
+                Tk::Eof => break peek.info.clone(),
                 _ => self.pop_leaf(),
             }
         };
-        if start != end {
-            self.error("extraneous input", Span::new(start, end));
+
+        if start_info.span != end_info.span {
+            self.error("extraneous input", start_info.combine_with(end_info));
         }
 
         self.close(Sk::ReplInput);
@@ -82,17 +84,17 @@ impl<'a> TreeBuilder<'a> {
             self.skip_trivia();
             let peek = self.tokens.peek();
             let kind = peek.kind;
-            let span = peek.span;
+            let info = peek.info.clone();
             match kind {
                 Tk::Eof => break,
                 Tk::Name if *peek.text == "use" => self.parse_use(),
                 Tk::LBrace | Tk::RBrace | Tk::String | Tk::UnterminatedString => self.parse_use(),
                 Tk::Alias | Tk::Name if self.starts_def() => self.parse_def(),
                 Tk::Equals => self.parse_def(),
-                Tk::Semi => self.error("extraneous ';'", span),
+                Tk::Semi => self.error("extraneous ';'", info),
                 _ => {
-                    let span = self.skip_to_decl_separator();
-                    self.error("expected definition or use declaration here", span);
+                    let info = self.skip_to_decl_separator();
+                    self.error("expected definition or use declaration here", info);
                 }
             }
 
@@ -101,13 +103,13 @@ impl<'a> TreeBuilder<'a> {
             match peek.kind {
                 Tk::Semi => self.pop_leaf(),
                 Tk::Eof => {
-                    let span = peek.span;
-                    self.error("missing a ';'", span);
+                    let info = peek.info.clone();
+                    self.error("missing a ';'", info);
                     break;
                 }
                 _ => {
-                    let span = self.skip_to_decl_separator();
-                    self.error("extraneous input", span);
+                    let info = self.skip_to_decl_separator();
+                    self.error("extraneous input", info);
 
                     debug_assert!(match self.tokens.peek().kind {
                         Tk::Semi | Tk::Eof => true,
@@ -120,16 +122,16 @@ impl<'a> TreeBuilder<'a> {
         self.close(Sk::Module);
     }
 
-    fn skip_to_decl_separator(&mut self) -> Span {
-        let start = self.tokens.peek().span.start;
-        let end = loop {
+    fn skip_to_decl_separator(&mut self) -> SourceInfo {
+        let start_info = self.tokens.peek().info.clone();
+        let end_info = loop {
             let peek = self.tokens.peek();
             match peek.kind {
-                Tk::Semi | Tk::Eof => break peek.span.start,
+                Tk::Semi | Tk::Eof => break peek.info.clone(),
                 _ => self.pop_leaf(),
             }
         };
-        Span::new(start, end)
+        start_info.combine_with(end_info)
     }
 
     fn parse_def(&mut self) {
@@ -143,20 +145,20 @@ impl<'a> TreeBuilder<'a> {
         let peek = self.tokens.peek();
         match peek.kind {
             Tk::Alias => {
-                self.open(Sk::DefAlias);
+                self.open(Sk::Name);
                 self.pop_leaf();
-                self.close(Sk::DefAlias);
+                self.close(Sk::Name);
             }
             Tk::Name => {
-                let span = peek.span;
-                self.error("expected an alias, not a name", span);
-                self.open(Sk::BadDefAlias);
+                let info = peek.info.clone();
+                self.error("expected an alias, not a var", info);
+                self.open(Sk::BadName);
                 self.pop_leaf();
-                self.close(Sk::BadDefAlias);
+                self.close(Sk::BadName);
             }
             Tk::Equals => {
-                let span = peek.span;
-                self.error("expected an alias name before this", span);
+                let info = peek.info.clone();
+                self.error("expected an alias name before this", info);
                 self.dummy();
             }
             _ => unreachable!(),
@@ -167,12 +169,12 @@ impl<'a> TreeBuilder<'a> {
         match peek.kind {
             Tk::Equals => self.pop_leaf(),
             Tk::Name | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => {
-                let span = peek.span;
-                self.error("expected an '=' before this", span);
+                let info = peek.info.clone();
+                self.error("expected an '=' before this", info);
             }
             _ => {
-                let span = peek.span;
-                self.error("expected an '=', followed by a term before this", span);
+                let info = peek.info.clone();
+                self.error("expected an '=', followed by a term before this", info);
                 self.dummy();
                 self.close(Sk::Def);
                 return;
@@ -202,8 +204,8 @@ impl<'a> TreeBuilder<'a> {
             | Tk::RBrace
             | Tk::String
             | Tk::UnterminatedString => {
-                let span = peek.span;
-                self.error("expected 'use' before this", span);
+                let info = peek.info.clone();
+                self.error("expected 'use' before this", info);
             }
             _ => unreachable!(),
         }
@@ -216,12 +218,12 @@ impl<'a> TreeBuilder<'a> {
         match peek.kind {
             Tk::Name if *peek.text == "from" => self.pop_leaf(),
             Tk::String | Tk::UnterminatedString => {
-                let span = peek.span;
-                self.error("expected 'from' before this", span);
+                let info = peek.info.clone();
+                self.error("expected 'from' before this", info);
             }
             _ => {
-                let span = peek.span;
-                self.error("expected 'from', followed by a filepath before this", span);
+                let info = peek.info.clone();
+                self.error("expected 'from', followed by a filepath before this", info);
                 self.dummy();
                 self.close(Sk::Use);
                 return;
@@ -237,15 +239,15 @@ impl<'a> TreeBuilder<'a> {
                 self.close(Sk::UseFilepath);
             }
             Tk::UnterminatedString => {
-                let span = peek.span;
-                self.error("unterminated filepath", span);
+                let info = peek.info.clone();
+                self.error("unterminated filepath", info);
                 self.open(Sk::UseFilepath);
                 self.pop_leaf();
                 self.close(Sk::UseFilepath);
             }
             _ => {
-                let span = peek.span;
-                self.error("expected a filepath before this", span);
+                let info = peek.info.clone();
+                self.error("expected a filepath before this", info);
                 self.dummy();
                 self.close(Sk::Use);
                 return;
@@ -259,7 +261,7 @@ impl<'a> TreeBuilder<'a> {
         debug_assert!(self.tokens.peek().is_nontrivial());
 
         let peek = self.tokens.peek();
-        let span = peek.span;
+        let info = peek.info.clone();
         match peek.kind {
             Tk::LBrace => {
                 self.open(Sk::UseAliases);
@@ -267,12 +269,12 @@ impl<'a> TreeBuilder<'a> {
             }
             Tk::Alias | Tk::Name | Tk::Comma | Tk::RBrace => {
                 self.open(Sk::UseAliases);
-                self.error("expected a '{' before this", span);
+                self.error("expected a '{' before this", info);
             }
             _ => {
                 self.error(
                     "expected a list of aliases enclosed in '{ .. }' before this",
-                    span,
+                    info,
                 );
                 self.dummy();
                 return;
@@ -284,28 +286,28 @@ impl<'a> TreeBuilder<'a> {
             let peek = self.tokens.peek();
             match peek.kind {
                 Tk::Alias => {
-                    self.open(Sk::UseAlias);
+                    self.open(Sk::Name);
                     self.pop_leaf();
-                    self.close(Sk::UseAlias);
+                    self.close(Sk::Name);
                 }
                 Tk::Name => {
-                    let span = peek.span;
-                    self.error("expected an alias here, not a name", span);
-                    self.open(Sk::BadUseAlias);
+                    let info = peek.info.clone();
+                    self.error("expected an alias here, not a name", info);
+                    self.open(Sk::BadName);
                     self.pop_leaf();
-                    self.close(Sk::BadUseAlias);
+                    self.close(Sk::BadName);
                 }
                 Tk::RBrace => {
                     self.pop_leaf();
                     break;
                 }
                 Tk::Comma => {
-                    let span = peek.span;
-                    self.error("extraneous ','", span);
+                    let info = peek.info.clone();
+                    self.error("extraneous ','", info);
                 }
                 _ => {
-                    let span = peek.span;
-                    self.error("expected a '}' before this", span);
+                    let info = peek.info.clone();
+                    self.error("expected a '}' before this", info);
                     break;
                 }
             }
@@ -319,12 +321,12 @@ impl<'a> TreeBuilder<'a> {
                     break;
                 }
                 Tk::Alias | Tk::Name => {
-                    let span = peek.span;
-                    self.error("expected a ',' before this", span);
+                    let info = peek.info.clone();
+                    self.error("expected a ',' before this", info);
                 }
                 _ => {
-                    let span = peek.span;
-                    self.error("expected a '}' before this", span);
+                    let info = peek.info.clone();
+                    self.error("expected a '}' before this", info);
                     break;
                 }
             }
@@ -353,7 +355,7 @@ impl<'a> TreeBuilder<'a> {
     fn parse_tm(&mut self) {
         debug_assert!(self.tokens.peek().is_nontrivial());
         let peek = self.tokens.peek();
-        let span = peek.span;
+        let info = peek.info.clone();
         match peek.kind.clone() {
             Tk::Name if self.starts_single_abs() => self.parse_single_abs(),
             Tk::Name => self.parse_name(),
@@ -362,7 +364,7 @@ impl<'a> TreeBuilder<'a> {
             Tk::LParen => self.parse_parend(),
             Tk::Comma => self.parse_multi_abs(),
             Tk::Arrow => self.parse_abs_from_arrow(),
-            _ => self.error("expected a term before this", span),
+            _ => self.error("expected a term before this", info),
         }
     }
 
@@ -370,9 +372,9 @@ impl<'a> TreeBuilder<'a> {
         debug_assert!(self.tokens.peek().kind == Tk::Name);
         self.open(Sk::Abs);
         self.open(Sk::AbsVars);
-        self.open(Sk::AbsVar);
+        self.open(Sk::Name);
         self.pop_leaf();
-        self.close(Sk::AbsVar);
+        self.close(Sk::Name);
         self.close(Sk::AbsVars);
 
         self.skip_trivia();
@@ -402,8 +404,8 @@ impl<'a> TreeBuilder<'a> {
         self.open(Sk::Abs);
         self.dummy();
 
-        let arrow_span = self.tokens.peek().span;
-        self.error("expected abstraction name(s) before this", arrow_span);
+        let arrow_info = self.tokens.peek().info.clone();
+        self.error("expected abstraction name(s) before this", arrow_info);
 
         self.skip_trivia();
         self.parse_abs_after_names();
@@ -417,12 +419,12 @@ impl<'a> TreeBuilder<'a> {
         match peek.kind {
             Tk::Arrow => self.pop_leaf(),
             Tk::Name | Tk::Alias | Tk::LParen | Tk::Comma => {
-                let span = peek.span;
-                self.error("expected an '=>' before this", span);
+                let info = peek.info.clone();
+                self.error("expected an '=>' before this", info);
             }
             _ => {
-                let span = peek.span;
-                self.error("expected an '=>', followed by a term before this", span);
+                let info = peek.info.clone();
+                self.error("expected an '=>', followed by a term before this", info);
                 self.dummy();
                 return;
             }
@@ -443,8 +445,8 @@ impl<'a> TreeBuilder<'a> {
         match peek.kind {
             Tk::LParen => self.pop_leaf(),
             Tk::Comma => {
-                let span = peek.span;
-                self.error("expected a '(' before this", span);
+                let info = peek.info.clone();
+                self.error("expected a '(' before this", info);
             }
             _ => unreachable!(),
         }
@@ -454,28 +456,28 @@ impl<'a> TreeBuilder<'a> {
             let peek = self.tokens.peek();
             match peek.kind {
                 Tk::Name => {
-                    self.open(Sk::AbsVar);
+                    self.open(Sk::Name);
                     self.pop_leaf();
-                    self.close(Sk::AbsVar);
+                    self.close(Sk::Name);
                 }
                 Tk::Alias => {
-                    let span = peek.span;
-                    self.error("expected a name here, not an alias", span);
-                    self.open(Sk::BadAbsVar);
+                    let info = peek.info.clone();
+                    self.error("expected a var here, not an alias", info);
+                    self.open(Sk::BadName);
                     self.pop_leaf();
-                    self.close(Sk::BadAbsVar);
+                    self.close(Sk::BadName);
                 }
                 Tk::RParen => {
                     self.pop_leaf();
                     break;
                 }
                 Tk::Comma => {
-                    let span = peek.span;
-                    self.error("extraneous ','", span);
+                    let info = peek.info.clone();
+                    self.error("extraneous ','", info);
                 }
                 _ => {
-                    let span = peek.span;
-                    self.error("expected a ')' before this", span);
+                    let info = peek.info.clone();
+                    self.error("expected a ')' before this", info);
                     break;
                 }
             }
@@ -489,12 +491,12 @@ impl<'a> TreeBuilder<'a> {
                     break;
                 }
                 Tk::Name | Tk::Alias => {
-                    let span = peek.span;
-                    self.error("expected a ',' before this", span);
+                    let info = peek.info.clone();
+                    self.error("expected a ',' before this", info);
                 }
                 _ => {
-                    let span = peek.span;
-                    self.error("expected a ')' before this", span);
+                    let info = peek.info.clone();
+                    self.error("expected a ')' before this", info);
                     break;
                 }
             }
@@ -505,9 +507,9 @@ impl<'a> TreeBuilder<'a> {
 
     fn parse_name(&mut self) {
         debug_assert!(self.tokens.peek().kind == Tk::Name);
-        self.open(Sk::Name);
+        self.open(Sk::Var);
         self.pop_leaf();
-        self.close(Sk::Name);
+        self.close(Sk::Var);
     }
 
     fn parse_alias(&mut self) {
@@ -520,7 +522,7 @@ impl<'a> TreeBuilder<'a> {
     fn parse_parend(&mut self) {
         debug_assert!(self.tokens.peek().kind == Tk::LParen);
         let lparen = self.tokens.pop();
-        let lparen_span = lparen.span;
+        let lparen_info = lparen.info.clone();
         self.leaf(lparen);
 
         self.skip_trivia();
@@ -529,7 +531,7 @@ impl<'a> TreeBuilder<'a> {
         self.skip_trivia();
         match self.tokens.peek().kind {
             Tk::RParen => self.pop_leaf(),
-            _ => self.error("unmatched '('", lparen_span),
+            _ => self.error("unmatched '('", lparen_info),
         }
     }
 
@@ -600,8 +602,8 @@ impl<'a> TreeBuilder<'a> {
             match peek.kind {
                 Tk::Whitespace | Tk::Comment => self.pop_leaf(),
                 Tk::Unknown => {
-                    let span = peek.span;
-                    self.error("unknown token", span);
+                    let info = peek.info.clone();
+                    self.error("unknown token", info);
                     self.pop_leaf();
                 }
                 _ => break,
@@ -615,7 +617,7 @@ impl<'a> TreeBuilder<'a> {
     }
 
     fn leaf(&mut self, token: Token) {
-        self.pos = token.span.end;
+        self.pos = token.info.span.end;
         self.wip.push(Entry::Complete(UntypedTree::Leaf(token)))
     }
 
@@ -644,7 +646,7 @@ impl<'a> TreeBuilder<'a> {
                     children.reverse();
                     self.wip.push(Entry::Complete(UntypedTree::Inner {
                         kind,
-                        span: Span::new(start, self.pos),
+                        info: SourceInfo::new(Rc::clone(&self.source), start, self.pos),
                         children,
                     }));
                     return;
@@ -656,8 +658,8 @@ impl<'a> TreeBuilder<'a> {
         }
     }
 
-    fn error(&mut self, message: impl Into<String>, span: Span) {
-        self.errors.push(SimpleError::new(message, span));
+    fn error(&mut self, message: impl Into<String>, info: SourceInfo) {
+        self.errors.push(SimpleError::new(message, info));
     }
 
     fn dummy(&mut self) {

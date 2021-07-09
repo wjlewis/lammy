@@ -1,11 +1,11 @@
-use crate::source::Span;
+use crate::source::SourceInfo;
 use crate::syntax::lexer::Token;
 use std::fmt;
 
 pub enum UntypedTree {
     Inner {
         kind: SyntaxKind,
-        span: Span,
+        info: SourceInfo,
         children: Vec<UntypedTree>,
     },
     Leaf(Token),
@@ -38,17 +38,17 @@ impl UntypedTree {
         match self {
             UntypedTree::Inner {
                 kind,
-                span,
+                info,
                 children,
             } => {
-                writeln!(f, "{:?}@{:?}", kind, span)?;
+                writeln!(f, "{:?}@{:?}", kind, info)?;
                 for child in children {
                     child.fmt_debug(f, level + 1)?;
                 }
                 Ok(())
             }
-            UntypedTree::Leaf(Token { kind, text, span }) => {
-                writeln!(f, r#"{:?}("{}")@{:?}"#, kind, text, span)
+            UntypedTree::Leaf(Token { kind, text, info }) => {
+                writeln!(f, r#"{:?}("{}")@{:?}"#, kind, text, info)
             }
         }
     }
@@ -65,28 +65,17 @@ impl UntypedTree {
 #[derive(Debug, PartialEq)]
 pub enum SyntaxKind {
     ReplInput,
-
     Module,
-
     Def,
-    DefAlias,
-    BadDefAlias,
-
     Use,
     UseAliases,
-    UseAlias,
-    BadUseAlias,
     UseFilepath,
-
     Tms,
-
-    Name,
+    Var,
     Alias,
-
     Abs,
     AbsVars,
-    AbsVar,
-    BadAbsVar,
-
+    Name,
+    BadName,
     Dummy,
 }

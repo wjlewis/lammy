@@ -1,4 +1,4 @@
-use crate::source::{Source, Span};
+use crate::source::{Source, SourceInfo};
 use std::fmt;
 
 pub trait Error: fmt::Debug {
@@ -8,14 +8,14 @@ pub trait Error: fmt::Debug {
 #[derive(Debug)]
 pub struct SimpleError {
     message: String,
-    span: Span,
+    info: SourceInfo,
 }
 
 impl SimpleError {
-    pub fn new(message: impl Into<String>, span: Span) -> Self {
+    pub fn new(message: impl Into<String>, info: SourceInfo) -> Self {
         SimpleError {
             message: message.into(),
-            span,
+            info,
         }
     }
 }

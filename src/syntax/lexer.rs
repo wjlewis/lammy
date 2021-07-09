@@ -1,34 +1,33 @@
 mod interner;
 mod tokens;
 
-pub use tokens::{Token, TokenKind};
-
-use crate::source::Span;
-use interner::Interner;
+use self::interner::Interner;
+use crate::source::{Source, SourceInfo};
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::str::Chars;
+
+pub use tokens::{Token, TokenKind};
+
 use TokenKind as Tk;
 
 pub struct Lexer<'a> {
-    source: &'a str,
+    source: &'a Rc<Source>,
     chars: Chars<'a>,
     interner: Interner<'a>,
     peeked: VecDeque<Token>,
 }
 
-impl<'a> From<&'a str> for Lexer<'a> {
-    fn from(source: &'a str) -> Self {
-        Lexer {
+impl<'a> Lexer<'a> {
+    pub fn new(source: &'a Rc<Source>) -> Self {
+        Self {
             source,
-            chars: source.chars(),
+            chars: source.text.chars(),
             interner: Interner::default(),
             peeked: VecDeque::new(),
         }
     }
-}
 
-impl<'a> Lexer<'a> {
     pub fn pop(&mut self) -> Token {
         match self.peeked.pop_front() {
             Some(next) => next,
@@ -60,7 +59,11 @@ impl<'a> Lexer<'a> {
         let start = self.current_pos();
         let next = self.chars.next();
         if next.is_none() {
-            return Token::new(Tk::Eof, self.interner.intern(""), Span::new(start, start));
+            return Token::new(
+                Tk::Eof,
+                self.interner.intern(""),
+                SourceInfo::new(Rc::clone(&self.source), start, start),
+            );
         }
 
         let kind = match next.unwrap() {
@@ -81,7 +84,11 @@ impl<'a> Lexer<'a> {
 
         let end = self.current_pos();
         let text = self.extract_text(&kind, start, end);
-        Token::new(kind, text, Span::new(start, end))
+        Token::new(
+            kind,
+            text,
+            SourceInfo::new(Rc::clone(&self.source), start, end),
+        )
     }
 
     fn read_equals_or_arrow(&mut self) -> Tk {
@@ -158,7 +165,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn current_pos(&self) -> usize {
-        self.source.len() - self.chars.as_str().len()
+        self.source.text.len() - self.chars.as_str().len()
     }
 
     fn is_name_start(c: char) -> bool {
@@ -213,7 +220,6 @@ impl<'a> Lexer<'a> {
             Tk::String => end - 1,
             _ => end,
         };
-        let text = &self.source[start..end];
-        self.interner.intern(text)
+        self.interner.intern(&self.source.text[start..end])
     }
 }

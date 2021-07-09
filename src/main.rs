@@ -2,7 +2,9 @@ mod errors;
 mod source;
 mod syntax;
 
-use syntax::parse_module;
+use crate::source::Source;
+use crate::syntax::parse_module;
+use std::rc::Rc;
 
 fn main() {
     let input = r#"
@@ -21,10 +23,16 @@ Suc = n => (s, z) => s (n s z);
 # Alternatively, we can do away with the syntactic sugar:
 Zero' = s => z => z;
 Suc' = n => s => z => s ((n s) z);
+
+Y = f => (x => f (x x))
+          x => f (x x);
 "#;
 
     println!(
         "{:#?}",
-        parse_module(String::from(input), String::from("./my-first-file"))
+        parse_module(Rc::new(Source::new(
+            String::from("my-file"),
+            String::from(input)
+        )))
     );
 }
