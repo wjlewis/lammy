@@ -11,14 +11,14 @@ pub enum ReplInput {
 
 #[derive(Debug)]
 pub struct Module {
-    pub use_decls: Vec<UseDecl>,
+    pub imports: Vec<Import>,
     pub defs: Vec<Def>,
     pub info: SourceInfo,
 }
 
 #[derive(Debug)]
-pub struct UseDecl {
-    pub aliases: Option<UseAliases>,
+pub struct Import {
+    pub aliases: Option<ImportAliases>,
     pub filepath: Option<Filepath>,
     pub info: SourceInfo,
 }
@@ -31,7 +31,7 @@ pub struct Def {
 }
 
 #[derive(Debug)]
-pub struct UseAliases {
+pub struct ImportAliases {
     pub aliases: Vec<Name>,
     pub info: SourceInfo,
 }
@@ -53,7 +53,7 @@ pub enum Term {
         info: SourceInfo,
     },
     Abs {
-        names: Option<AbsVars>,
+        vars: Vec<Name>,
         body: Option<Box<Term>>,
         info: SourceInfo,
     },
@@ -62,12 +62,6 @@ pub enum Term {
         rands: Vec<Term>,
         info: SourceInfo,
     },
-}
-
-#[derive(Debug)]
-pub struct AbsVars {
-    pub names: Vec<Name>,
-    pub info: SourceInfo,
 }
 
 #[derive(Debug)]

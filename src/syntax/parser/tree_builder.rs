@@ -87,14 +87,16 @@ impl<'a> TreeBuilder<'a> {
             let info = peek.info.clone();
             match kind {
                 Tk::Eof => break,
-                Tk::Name if *peek.text == "use" => self.parse_use(),
-                Tk::LBrace | Tk::RBrace | Tk::String | Tk::UnterminatedString => self.parse_use(),
+                Tk::Name if *peek.text == "import" => self.parse_import(),
+                Tk::LBrace | Tk::RBrace | Tk::String | Tk::UnterminatedString => {
+                    self.parse_import()
+                }
                 Tk::Alias | Tk::Name if self.starts_def() => self.parse_def(),
                 Tk::Equals => self.parse_def(),
                 Tk::Semi => self.error("extraneous ';'", info),
                 _ => {
                     let info = self.skip_to_decl_separator();
-                    self.error("expected definition or use declaration here", info);
+                    self.error("expected definition or import declaration here", info);
                 }
             }
 
@@ -186,17 +188,17 @@ impl<'a> TreeBuilder<'a> {
         self.close(Sk::Def);
     }
 
-    fn parse_use(&mut self) {
+    fn parse_import(&mut self) {
         debug_assert!(match self.tokens.peek().kind {
             Tk::Name | Tk::LBrace | Tk::RBrace | Tk::String | Tk::UnterminatedString => true,
             _ => false,
         });
 
-        self.open(Sk::Use);
+        self.open(Sk::Import);
 
         let peek = self.tokens.peek();
         match peek.kind {
-            Tk::Name if *peek.text == "use" => self.pop_leaf(),
+            Tk::Name if *peek.text == "import" => self.pop_leaf(),
             Tk::LBrace
             | Tk::Alias
             | Tk::Name
@@ -205,13 +207,13 @@ impl<'a> TreeBuilder<'a> {
             | Tk::String
             | Tk::UnterminatedString => {
                 let info = peek.info.clone();
-                self.error("expected 'use' before this", info);
+                self.error("expected 'import' before this", info);
             }
             _ => unreachable!(),
         }
 
         self.skip_trivia();
-        self.parse_use_aliases();
+        self.parse_import_aliases();
 
         self.skip_trivia();
         let peek = self.tokens.peek();
@@ -225,7 +227,7 @@ impl<'a> TreeBuilder<'a> {
                 let info = peek.info.clone();
                 self.error("expected 'from', followed by a filepath before this", info);
                 self.dummy();
-                self.close(Sk::Use);
+                self.close(Sk::Import);
                 return;
             }
         }
@@ -234,46 +236,46 @@ impl<'a> TreeBuilder<'a> {
         let peek = self.tokens.peek();
         match peek.kind {
             Tk::String => {
-                self.open(Sk::UseFilepath);
+                self.open(Sk::ImportFilepath);
                 self.pop_leaf();
-                self.close(Sk::UseFilepath);
+                self.close(Sk::ImportFilepath);
             }
             Tk::UnterminatedString => {
                 let info = peek.info.clone();
                 self.error("unterminated filepath", info);
-                self.open(Sk::UseFilepath);
+                self.open(Sk::ImportFilepath);
                 self.pop_leaf();
-                self.close(Sk::UseFilepath);
+                self.close(Sk::ImportFilepath);
             }
             _ => {
                 let info = peek.info.clone();
                 self.error("expected a filepath before this", info);
                 self.dummy();
-                self.close(Sk::Use);
+                self.close(Sk::Import);
                 return;
             }
         }
 
-        self.close(Sk::Use);
+        self.close(Sk::Import);
     }
 
-    fn parse_use_aliases(&mut self) {
+    fn parse_import_aliases(&mut self) {
         debug_assert!(self.tokens.peek().is_nontrivial());
 
         let peek = self.tokens.peek();
         let info = peek.info.clone();
         match peek.kind {
             Tk::LBrace => {
-                self.open(Sk::UseAliases);
+                self.open(Sk::ImportAliases);
                 self.pop_leaf();
             }
             Tk::Alias | Tk::Name | Tk::Comma | Tk::RBrace => {
-                self.open(Sk::UseAliases);
+                self.open(Sk::ImportAliases);
                 self.error("expected a '{' before this", info);
             }
             _ => {
                 self.error(
-                    "expected a list of aliases enclosed in '{ .. }' before this",
+                    "expected a list of aliases enclosed in '{..}' before this",
                     info,
                 );
                 self.dummy();
@@ -332,7 +334,7 @@ impl<'a> TreeBuilder<'a> {
             }
         }
 
-        self.close(Sk::UseAliases);
+        self.close(Sk::ImportAliases);
     }
 
     fn parse_tms(&mut self) {
@@ -405,7 +407,10 @@ impl<'a> TreeBuilder<'a> {
         self.dummy();
 
         let arrow_info = self.tokens.peek().info.clone();
-        self.error("expected abstraction name(s) before this", arrow_info);
+        self.error(
+            "expected abstraction var(s) enclosed in '(..)' before this",
+            arrow_info,
+        );
 
         self.skip_trivia();
         self.parse_abs_after_names();

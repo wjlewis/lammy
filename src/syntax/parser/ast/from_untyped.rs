@@ -1,5 +1,5 @@
 use super::super::untyped_tree::{SyntaxKind as Sk, UntypedTree};
-use super::{AbsVars, Def, Filepath, Module, Name, ReplInput, Term, UseAliases, UseDecl};
+use super::{Def, Filepath, Import, ImportAliases, Module, Name, ReplInput, Term};
 use crate::syntax::lexer::Token;
 
 use UntypedTree::*;
@@ -44,13 +44,13 @@ impl From<UntypedTree> for Module {
                 info,
                 children,
             } => {
-                let (use_decls, defs): (Vec<UntypedTree>, Vec<UntypedTree>) =
-                    skip_concrete(children).partition(|tree| tree.is_use_decl());
+                let (imports, defs): (Vec<UntypedTree>, Vec<UntypedTree>) =
+                    skip_concrete(children).partition(|tree| tree.is_import());
 
-                let use_decls = use_decls
+                let imports = imports
                     .into_iter()
-                    .map(<Option<UseDecl>>::from)
-                    .collect::<Option<Vec<UseDecl>>>();
+                    .map(<Option<Import>>::from)
+                    .collect::<Option<Vec<Import>>>();
 
                 let defs = defs
                     .into_iter()
@@ -58,7 +58,7 @@ impl From<UntypedTree> for Module {
                     .collect::<Option<Vec<Def>>>();
 
                 Module {
-                    use_decls: use_decls.unwrap_or(Vec::new()),
+                    imports: imports.unwrap_or(Vec::new()),
                     defs: defs.unwrap_or(Vec::new()),
                     info,
                 }
@@ -72,11 +72,11 @@ impl From<UntypedTree> for Module {
     }
 }
 
-impl From<UntypedTree> for Option<UseDecl> {
-    fn from(tree: UntypedTree) -> Option<UseDecl> {
+impl From<UntypedTree> for Option<Import> {
+    fn from(tree: UntypedTree) -> Option<Import> {
         match tree {
             Inner {
-                kind: Sk::Use,
+                kind: Sk::Import,
                 info,
                 children,
             } => {
@@ -86,10 +86,10 @@ impl From<UntypedTree> for Option<UseDecl> {
                 let filepath = children.pop();
                 let aliases = children.pop();
 
-                let aliases = aliases.and_then(<Option<UseAliases>>::from);
+                let aliases = aliases.and_then(<Option<ImportAliases>>::from);
                 let filepath = filepath.and_then(<Option<Filepath>>::from);
 
-                Some(UseDecl {
+                Some(Import {
                     aliases,
                     filepath,
                     info,
@@ -124,17 +124,17 @@ impl From<UntypedTree> for Option<Def> {
     }
 }
 
-impl From<UntypedTree> for Option<UseAliases> {
-    fn from(tree: UntypedTree) -> Option<UseAliases> {
+impl From<UntypedTree> for Option<ImportAliases> {
+    fn from(tree: UntypedTree) -> Option<ImportAliases> {
         match tree {
             Inner {
-                kind: Sk::UseAliases,
+                kind: Sk::ImportAliases,
                 info,
                 children,
             } => {
                 let aliases: Option<Vec<Name>> =
                     skip_concrete(children).map(<Option<Name>>::from).collect();
-                aliases.map(|aliases| UseAliases { aliases, info })
+                aliases.map(|aliases| ImportAliases { aliases, info })
             }
             _ => None,
         }
@@ -170,7 +170,7 @@ impl From<UntypedTree> for Option<Filepath> {
     fn from(tree: UntypedTree) -> Option<Filepath> {
         match tree {
             Inner {
-                kind: Sk::UseFilepath,
+                kind: Sk::ImportFilepath,
                 info,
                 mut children,
             } => match children.pop() {
@@ -232,12 +232,12 @@ impl UntypedTree {
 
                     // Note the ordering here
                     let body = children.pop();
-                    let names = children.pop();
+                    let vars = children.pop();
 
                     let body = body.and_then(<Option<Term>>::from).map(Box::new);
-                    let names = names.and_then(<Option<AbsVars>>::from);
+                    let vars = vars.map(<Vec<Name>>::from).unwrap_or(Vec::new());
 
-                    Some(Term::Abs { names, body, info })
+                    Some(Term::Abs { vars, body, info })
                 }
                 Sk::Tms => {
                     let terms = Inner {
@@ -253,9 +253,11 @@ impl UntypedTree {
         }
     }
 
-    fn is_use_decl(&self) -> bool {
+    fn is_import(&self) -> bool {
         match self {
-            Inner { kind: Sk::Use, .. } => true,
+            Inner {
+                kind: Sk::Import, ..
+            } => true,
             Inner { kind: Sk::Def, .. } => false,
             Inner { kind, .. } => {
                 panic!(
@@ -270,8 +272,8 @@ impl UntypedTree {
     }
 }
 
-impl From<UntypedTree> for Option<AbsVars> {
-    fn from(tree: UntypedTree) -> Option<AbsVars> {
+impl From<UntypedTree> for Vec<Name> {
+    fn from(tree: UntypedTree) -> Vec<Name> {
         match tree {
             Inner {
                 kind: Sk::AbsVars,
@@ -280,9 +282,9 @@ impl From<UntypedTree> for Option<AbsVars> {
             } => {
                 let names: Option<Vec<Name>> =
                     skip_concrete(children).map(<Option<Name>>::from).collect();
-                names.map(|names| AbsVars { names, info })
+                names.unwrap_or(Vec::new())
             }
-            _ => None,
+            _ => Vec::new(),
         }
     }
 }

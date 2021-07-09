@@ -1,38 +1,24 @@
 mod errors;
 mod source;
 mod syntax;
+mod terms;
 
 use crate::source::Source;
-use crate::syntax::parse_module;
+use crate::syntax::{parse_module, parse_repl_input, Parsed, ReplInput};
 use std::rc::Rc;
 
 fn main() {
     let input = r#"
-use { I, K } from "./general-purpose";
+import { Id, K } from "./test";
+import { Another } from "./another";
 
-# Here's a demonstration of the definition mechanism:
-Flip2 = combinator => (x, y) => combinator y x;
-
-# We can use `Flip2` to define a flipped version of `K`:
-K' = Flip2 K;
-
-# Some natural numbers:
-Zero = (s, z) => z;
-Suc = n => (s, z) => s (n s z);
-
-# Alternatively, we can do away with the syntactic sugar:
-Zero' = s => z => z;
-Suc' = n => s => z => s ((n s) z);
-
-Y = f => (x => f (x x))
-          x => f (x x);
+Quux = (x, y) => y;
 "#;
 
-    println!(
-        "{:#?}",
-        parse_module(Rc::new(Source::new(
-            String::from("my-file"),
-            String::from(input)
-        )))
-    );
+    let result = parse_module(Rc::new(Source::new(
+        String::from("my-file"),
+        String::from(input),
+    )));
+
+    println!("{:#?}", result);
 }

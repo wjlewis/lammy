@@ -1,13 +1,13 @@
-use { Zero, Suc } from "./nats";
+import { Zero, Suc } from "./nats";
 
 # Together, these two terms define the natural
-# numbers. Note that we could have defined `Suc`
+# numbers. Note that we could have defined `Suc'`
 # as:
-#     Suc = (n, s, z) => s (n s z);
-Zero = (s, z) => z;
-Suc = n => (s, z) => s (n s z);
+#     Suc' = (n, s, z) => s (n s z);
+Zero' = (s, z) => z;
+Suc' = n => (s, z) => s (n s z);
 
-Sum = (m, n) => m Suc n;
+Sum = (m, n) => m Suc' n;
 
 Loop = (x => x x) x => x x;
 

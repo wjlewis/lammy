@@ -6,7 +6,7 @@ use crate::errors::SimpleError;
 use crate::source::Source;
 use std::rc::Rc;
 
-pub use parser::ast::{AbsVars, Def, Filepath, Module, Name, ReplInput, Term, UseAliases, UseDecl};
+pub use parser::ast::{Def, Filepath, Import, ImportAliases, Module, Name, ReplInput, Term};
 
 pub fn parse_repl_input(source: Rc<Source>) -> Parsed<Option<ReplInput>> {
     let mut builder = TreeBuilder::new(&source);
