@@ -1,37 +1,30 @@
 mod errors;
-mod lexer;
-mod parser;
 mod source;
+mod syntax;
 
-use crate::parser::{Module, ParseResult, TreeBuilder};
+use syntax::parse_module;
 
 fn main() {
     let input = r#"
-# Natural numbers
-use { Cons, Fst, Snd } from "./pairs";
-use { K, Y } from "./general-purpose";
-use { If, True, False } from "./booleans";
+use { I, K } from "./general-purpose";
 
+# Here's a demonstration of the definition mechanism:
+Flip2 = combinator => (x, y) => combinator y x;
+
+# We can use `Flip2` to define a flipped version of `K`:
+K' = Flip2 K;
+
+# Some natural numbers:
 Zero = (s, z) => z;
 Suc = n => (s, z) => s (n s z);
-Zero? = n => n (K False) True;
 
-Pred = n => Fst (n (prev => Cons (Snd prev) (Suc (Snd prev)))
-                   (Cons Zero Zero));
-
-Sum = (m, n) => m Suc n;
-Prod = (m, n) => m (Sum n) Zero;
-Pow = (b, e) => e (Prod b) (Suc Zero);
-
-Fact = Y fact => n => If (Zero? n)
-                         (Suc Zero)
-                         (Prod n (fact (Pred n)));
+# Alternatively, we can do away with the syntactic sugar:
+Zero' = s => z => z;
+Suc' = n => s => z => s ((n s) z);
 "#;
-    let mut builder = TreeBuilder::from(input);
 
-    builder.parse_module();
-    let ParseResult { tree, errors } = builder.take();
-
-    println!("{:#?}", Module::from(tree));
-    println!("{:#?}", errors);
+    println!(
+        "{:#?}",
+        parse_module(String::from(input), String::from("./my-first-file"))
+    );
 }

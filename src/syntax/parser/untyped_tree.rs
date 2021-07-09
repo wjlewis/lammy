@@ -1,5 +1,5 @@
-use crate::lexer::Token;
 use crate::source::Span;
+use crate::syntax::lexer::Token;
 use std::fmt;
 
 pub enum UntypedTree {
@@ -18,7 +18,7 @@ impl fmt::Debug for UntypedTree {
 }
 
 impl UntypedTree {
-    pub fn is_concrete(&self) -> bool {
+    pub fn is_leaf(&self) -> bool {
         match self {
             Self::Leaf(..) => true,
             _ => false,
@@ -84,9 +84,9 @@ pub enum SyntaxKind {
     Alias,
 
     Abs,
-    AbsNames,
-    AbsName,
-    BadAbsName,
+    AbsVars,
+    AbsVar,
+    BadAbsVar,
 
     Dummy,
 }

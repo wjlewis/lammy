@@ -1,13 +1,7 @@
-use super::untyped::{SyntaxKind, UntypedTree};
+use super::untyped_tree::{SyntaxKind as Sk, UntypedTree};
 use crate::errors::SimpleError;
-use crate::lexer::{Lexer, Token, TokenKind as Tk};
 use crate::source::Span;
-
-#[derive(Debug)]
-pub struct ParseResult {
-    pub tree: UntypedTree,
-    pub errors: Vec<SimpleError>,
-}
+use crate::syntax::lexer::{Lexer, Token, TokenKind as Tk};
 
 pub struct TreeBuilder<'a> {
     tokens: Lexer<'a>,
@@ -16,9 +10,45 @@ pub struct TreeBuilder<'a> {
     pos: usize,
 }
 
+#[derive(Debug)]
+pub struct ParseResult {
+    pub tree: UntypedTree,
+    pub errors: Vec<SimpleError>,
+}
+
+impl<'a> From<&'a str> for TreeBuilder<'a> {
+    fn from(source: &'a str) -> Self {
+        Self {
+            tokens: Lexer::from(source),
+            wip: Vec::new(),
+            errors: Vec::new(),
+            pos: 0,
+        }
+    }
+}
+
 impl<'a> TreeBuilder<'a> {
+    pub fn take(mut self) -> ParseResult {
+        match self.wip.pop() {
+            None => panic!("no tree to take"),
+            Some(entry) => match entry {
+                Entry::InProgress { kind, .. } => panic!("unmatched `open` ({:?})", kind),
+                Entry::Complete(tree) => {
+                    if self.wip.is_empty() {
+                        ParseResult {
+                            tree,
+                            errors: self.errors,
+                        }
+                    } else {
+                        panic!("multiple toplevel trees")
+                    }
+                }
+            },
+        }
+    }
+
     pub fn parse_repl_input(&mut self) {
-        self.open(SyntaxKind::ReplInput);
+        self.open(Sk::ReplInput);
         self.skip_trivia();
         let peek = self.tokens.peek();
         let kind = peek.kind;
@@ -43,11 +73,11 @@ impl<'a> TreeBuilder<'a> {
             self.error("extraneous input", Span::new(start, end));
         }
 
-        self.close(SyntaxKind::ReplInput);
+        self.close(Sk::ReplInput);
     }
 
     pub fn parse_module(&mut self) {
-        self.open(SyntaxKind::Module);
+        self.open(Sk::Module);
         loop {
             self.skip_trivia();
             let peek = self.tokens.peek();
@@ -87,7 +117,7 @@ impl<'a> TreeBuilder<'a> {
                 }
             }
         }
-        self.close(SyntaxKind::Module);
+        self.close(Sk::Module);
     }
 
     fn skip_to_decl_separator(&mut self) -> Span {
@@ -108,21 +138,21 @@ impl<'a> TreeBuilder<'a> {
             _ => false,
         });
 
-        self.open(SyntaxKind::Def);
+        self.open(Sk::Def);
 
         let peek = self.tokens.peek();
         match peek.kind {
             Tk::Alias => {
-                self.open(SyntaxKind::DefAlias);
+                self.open(Sk::DefAlias);
                 self.pop_leaf();
-                self.close(SyntaxKind::DefAlias);
+                self.close(Sk::DefAlias);
             }
             Tk::Name => {
                 let span = peek.span;
                 self.error("expected an alias, not a name", span);
-                self.open(SyntaxKind::BadDefAlias);
+                self.open(Sk::BadDefAlias);
                 self.pop_leaf();
-                self.close(SyntaxKind::BadDefAlias);
+                self.close(Sk::BadDefAlias);
             }
             Tk::Equals => {
                 let span = peek.span;
@@ -144,14 +174,14 @@ impl<'a> TreeBuilder<'a> {
                 let span = peek.span;
                 self.error("expected an '=', followed by a term before this", span);
                 self.dummy();
-                self.close(SyntaxKind::Def);
+                self.close(Sk::Def);
                 return;
             }
         }
 
         self.skip_trivia();
         self.parse_tms();
-        self.close(SyntaxKind::Def);
+        self.close(Sk::Def);
     }
 
     fn parse_use(&mut self) {
@@ -160,7 +190,7 @@ impl<'a> TreeBuilder<'a> {
             _ => false,
         });
 
-        self.open(SyntaxKind::Use);
+        self.open(Sk::Use);
 
         let peek = self.tokens.peek();
         match peek.kind {
@@ -193,7 +223,7 @@ impl<'a> TreeBuilder<'a> {
                 let span = peek.span;
                 self.error("expected 'from', followed by a filepath before this", span);
                 self.dummy();
-                self.close(SyntaxKind::Use);
+                self.close(Sk::Use);
                 return;
             }
         }
@@ -202,27 +232,27 @@ impl<'a> TreeBuilder<'a> {
         let peek = self.tokens.peek();
         match peek.kind {
             Tk::String => {
-                self.open(SyntaxKind::UseFilepath);
+                self.open(Sk::UseFilepath);
                 self.pop_leaf();
-                self.close(SyntaxKind::UseFilepath);
+                self.close(Sk::UseFilepath);
             }
             Tk::UnterminatedString => {
                 let span = peek.span;
                 self.error("unterminated filepath", span);
-                self.open(SyntaxKind::UseFilepath);
+                self.open(Sk::UseFilepath);
                 self.pop_leaf();
-                self.close(SyntaxKind::UseFilepath);
+                self.close(Sk::UseFilepath);
             }
             _ => {
                 let span = peek.span;
                 self.error("expected a filepath before this", span);
                 self.dummy();
-                self.close(SyntaxKind::Use);
+                self.close(Sk::Use);
                 return;
             }
         }
 
-        self.close(SyntaxKind::Use);
+        self.close(Sk::Use);
     }
 
     fn parse_use_aliases(&mut self) {
@@ -232,11 +262,11 @@ impl<'a> TreeBuilder<'a> {
         let span = peek.span;
         match peek.kind {
             Tk::LBrace => {
-                self.open(SyntaxKind::UseAliases);
+                self.open(Sk::UseAliases);
                 self.pop_leaf();
             }
             Tk::Alias | Tk::Name | Tk::Comma | Tk::RBrace => {
-                self.open(SyntaxKind::UseAliases);
+                self.open(Sk::UseAliases);
                 self.error("expected a '{' before this", span);
             }
             _ => {
@@ -254,16 +284,16 @@ impl<'a> TreeBuilder<'a> {
             let peek = self.tokens.peek();
             match peek.kind {
                 Tk::Alias => {
-                    self.open(SyntaxKind::UseAlias);
+                    self.open(Sk::UseAlias);
                     self.pop_leaf();
-                    self.close(SyntaxKind::UseAlias);
+                    self.close(Sk::UseAlias);
                 }
                 Tk::Name => {
                     let span = peek.span;
                     self.error("expected an alias here, not a name", span);
-                    self.open(SyntaxKind::BadUseAlias);
+                    self.open(Sk::BadUseAlias);
                     self.pop_leaf();
-                    self.close(SyntaxKind::BadUseAlias);
+                    self.close(Sk::BadUseAlias);
                 }
                 Tk::RBrace => {
                     self.pop_leaf();
@@ -300,12 +330,12 @@ impl<'a> TreeBuilder<'a> {
             }
         }
 
-        self.close(SyntaxKind::UseAliases);
+        self.close(Sk::UseAliases);
     }
 
     fn parse_tms(&mut self) {
         debug_assert!(self.tokens.peek().is_nontrivial());
-        self.open(SyntaxKind::Tms);
+        self.open(Sk::Tms);
         self.parse_tm();
 
         loop {
@@ -317,7 +347,7 @@ impl<'a> TreeBuilder<'a> {
             }
         }
 
-        self.close(SyntaxKind::Tms);
+        self.close(Sk::Tms);
     }
 
     fn parse_tm(&mut self) {
@@ -338,17 +368,17 @@ impl<'a> TreeBuilder<'a> {
 
     fn parse_single_abs(&mut self) {
         debug_assert!(self.tokens.peek().kind == Tk::Name);
-        self.open(SyntaxKind::Abs);
-        self.open(SyntaxKind::AbsNames);
-        self.open(SyntaxKind::AbsName);
+        self.open(Sk::Abs);
+        self.open(Sk::AbsVars);
+        self.open(Sk::AbsVar);
         self.pop_leaf();
-        self.close(SyntaxKind::AbsName);
-        self.close(SyntaxKind::AbsNames);
+        self.close(Sk::AbsVar);
+        self.close(Sk::AbsVars);
 
         self.skip_trivia();
         self.parse_abs_after_names();
 
-        self.close(SyntaxKind::Abs);
+        self.close(Sk::Abs);
     }
 
     fn parse_multi_abs(&mut self) {
@@ -357,19 +387,19 @@ impl<'a> TreeBuilder<'a> {
             _ => false,
         });
 
-        self.open(SyntaxKind::Abs);
+        self.open(Sk::Abs);
         self.parse_abs_names();
 
         self.skip_trivia();
         self.parse_abs_after_names();
 
-        self.close(SyntaxKind::Abs);
+        self.close(Sk::Abs);
     }
 
     fn parse_abs_from_arrow(&mut self) {
         debug_assert!(self.tokens.peek().kind == Tk::Arrow);
 
-        self.open(SyntaxKind::Abs);
+        self.open(Sk::Abs);
         self.dummy();
 
         let arrow_span = self.tokens.peek().span;
@@ -378,7 +408,7 @@ impl<'a> TreeBuilder<'a> {
         self.skip_trivia();
         self.parse_abs_after_names();
 
-        self.close(SyntaxKind::Abs);
+        self.close(Sk::Abs);
     }
 
     fn parse_abs_after_names(&mut self) {
@@ -408,7 +438,7 @@ impl<'a> TreeBuilder<'a> {
             _ => false,
         });
 
-        self.open(SyntaxKind::AbsNames);
+        self.open(Sk::AbsVars);
         let peek = self.tokens.peek();
         match peek.kind {
             Tk::LParen => self.pop_leaf(),
@@ -424,16 +454,16 @@ impl<'a> TreeBuilder<'a> {
             let peek = self.tokens.peek();
             match peek.kind {
                 Tk::Name => {
-                    self.open(SyntaxKind::AbsName);
+                    self.open(Sk::AbsVar);
                     self.pop_leaf();
-                    self.close(SyntaxKind::AbsName);
+                    self.close(Sk::AbsVar);
                 }
                 Tk::Alias => {
                     let span = peek.span;
                     self.error("expected a name here, not an alias", span);
-                    self.open(SyntaxKind::BadAbsName);
+                    self.open(Sk::BadAbsVar);
                     self.pop_leaf();
-                    self.close(SyntaxKind::BadAbsName);
+                    self.close(Sk::BadAbsVar);
                 }
                 Tk::RParen => {
                     self.pop_leaf();
@@ -470,21 +500,21 @@ impl<'a> TreeBuilder<'a> {
             }
         }
 
-        self.close(SyntaxKind::AbsNames);
+        self.close(Sk::AbsVars);
     }
 
     fn parse_name(&mut self) {
         debug_assert!(self.tokens.peek().kind == Tk::Name);
-        self.open(SyntaxKind::Name);
+        self.open(Sk::Name);
         self.pop_leaf();
-        self.close(SyntaxKind::Name);
+        self.close(Sk::Name);
     }
 
     fn parse_alias(&mut self) {
         debug_assert!(self.tokens.peek().kind == Tk::Alias);
-        self.open(SyntaxKind::Alias);
+        self.open(Sk::Alias);
         self.pop_leaf();
-        self.close(SyntaxKind::Alias);
+        self.close(Sk::Alias);
     }
 
     fn parse_parend(&mut self) {
@@ -589,14 +619,14 @@ impl<'a> TreeBuilder<'a> {
         self.wip.push(Entry::Complete(UntypedTree::Leaf(token)))
     }
 
-    fn open(&mut self, kind: SyntaxKind) {
+    fn open(&mut self, kind: Sk) {
         self.wip.push(Entry::InProgress {
             kind,
             start: self.pos,
         });
     }
 
-    fn close(&mut self, kind: SyntaxKind) {
+    fn close(&mut self, kind: Sk) {
         let mut children = Vec::new();
         while let Some(entry) = self.wip.pop() {
             match entry {
@@ -631,42 +661,12 @@ impl<'a> TreeBuilder<'a> {
     }
 
     fn dummy(&mut self) {
-        self.open(SyntaxKind::Dummy);
-        self.close(SyntaxKind::Dummy);
-    }
-
-    pub fn take(mut self) -> ParseResult {
-        match self.wip.pop() {
-            None => panic!("no tree to take"),
-            Some(entry) => match entry {
-                Entry::InProgress { kind, .. } => panic!("unmatched `open` ({:?})", kind),
-                Entry::Complete(tree) => {
-                    if self.wip.is_empty() {
-                        ParseResult {
-                            tree,
-                            errors: self.errors,
-                        }
-                    } else {
-                        panic!("multiple toplevel trees")
-                    }
-                }
-            },
-        }
-    }
-}
-
-impl<'a> From<&'a str> for TreeBuilder<'a> {
-    fn from(source: &'a str) -> Self {
-        Self {
-            tokens: Lexer::from(source),
-            wip: Vec::new(),
-            errors: Vec::new(),
-            pos: 0,
-        }
+        self.open(Sk::Dummy);
+        self.close(Sk::Dummy);
     }
 }
 
 enum Entry {
-    InProgress { kind: SyntaxKind, start: usize },
+    InProgress { kind: Sk, start: usize },
     Complete(UntypedTree),
 }

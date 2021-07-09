@@ -1,7 +1,25 @@
 use std::fmt;
 
-pub struct SourceFile<'a> {
-    text: &'a str,
+#[derive(Debug)]
+pub struct Source {
+    filename: Option<String>,
+    text: String,
+}
+
+impl Source {
+    pub fn from_file(filename: String, text: String) -> Self {
+        Source {
+            filename: Some(filename),
+            text,
+        }
+    }
+
+    pub fn from_repl(text: String) -> Self {
+        Source {
+            filename: None,
+            text,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

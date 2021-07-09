@@ -1,8 +1,8 @@
-use crate::source::{SourceFile, Span};
+use crate::source::{Source, Span};
 use std::fmt;
 
 pub trait Error: fmt::Debug {
-    fn report(&self, src: &SourceFile, f: &mut fmt::Formatter) -> fmt::Result;
+    fn report(&self, src: &Source, f: &mut fmt::Formatter) -> fmt::Result;
 }
 
 #[derive(Debug)]
@@ -21,7 +21,7 @@ impl SimpleError {
 }
 
 impl Error for SimpleError {
-    fn report(&self, src: &SourceFile, f: &mut fmt::Formatter) -> fmt::Result {
+    fn report(&self, src: &Source, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "error: {}", self.message)
     }
 }

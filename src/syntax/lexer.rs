@@ -17,6 +17,17 @@ pub struct Lexer<'a> {
     peeked: VecDeque<Token>,
 }
 
+impl<'a> From<&'a str> for Lexer<'a> {
+    fn from(source: &'a str) -> Self {
+        Lexer {
+            source,
+            chars: source.chars(),
+            interner: Interner::default(),
+            peeked: VecDeque::new(),
+        }
+    }
+}
+
 impl<'a> Lexer<'a> {
     pub fn pop(&mut self) -> Token {
         match self.peeked.pop_front() {
@@ -204,16 +215,5 @@ impl<'a> Lexer<'a> {
         };
         let text = &self.source[start..end];
         self.interner.intern(text)
-    }
-}
-
-impl<'a> From<&'a str> for Lexer<'a> {
-    fn from(source: &'a str) -> Self {
-        Lexer {
-            source,
-            chars: source.chars(),
-            interner: Interner::default(),
-            peeked: VecDeque::new(),
-        }
     }
 }
