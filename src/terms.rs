@@ -1,6 +1,7 @@
 use crate::errors::{Error, SimpleError, WithErrors};
 use crate::source::SourceInfo;
 use crate::syntax::{Name, Term as SurfaceTerm};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -167,8 +168,127 @@ pub enum IndexedTerm {
     },
 }
 
+// Placeholder
+pub type Environment = usize;
+
 impl IndexedTerm {
     pub fn unindex(self) -> DesugaredTerm {
         todo!()
     }
+
+    pub fn aliases_in(&self) -> HashSet<Rc<String>> {
+        let mut aliases = HashSet::new();
+        self.aliases_in_using(&mut aliases);
+        aliases
+    }
+
+    pub fn aliases_in_using(&self, seen: &mut HashSet<Rc<String>>) {
+        use IndexedTerm::*;
+
+        match self {
+            Alias { text, .. } => {
+                seen.insert(Rc::clone(text));
+            }
+            Abs { body, .. } => {
+                if let Some(body) = body {
+                    body.aliases_in_using(seen);
+                }
+            }
+            App { rator, rand, .. } => {
+                if let Some(rator) = rator {
+                    rator.aliases_in_using(seen);
+                }
+                if let Some(rand) = rand {
+                    rand.aliases_in_using(seen);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn resolve(self, env: Environment) -> WithErrors<ResolvedTerm> {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub enum ResolvedTerm {
+    Index {
+        index: Option<usize>,
+        info: SourceInfo,
+    },
+    Abs {
+        var: Option<Name>,
+        body: Option<Box<ResolvedTerm>>,
+        info: SourceInfo,
+    },
+    App {
+        rator: Option<Box<ResolvedTerm>>,
+        rand: Option<Box<ResolvedTerm>>,
+        info: SourceInfo,
+    },
+}
+
+// All errors have been reported at this point.
+// If no errors have occurred, we should be able to
+// extract a `Some(CoreTerm)`.
+impl From<ResolvedTerm> for Option<CoreTerm> {
+    fn from(term: ResolvedTerm) -> Option<CoreTerm> {
+        use CoreTerm as CTerm;
+        use ResolvedTerm as RTerm;
+
+        match term {
+            RTerm::Index {
+                index: Some(index),
+                info,
+            } => Some(CTerm::Index { index, info }),
+            RTerm::Abs {
+                var: Some(var),
+                body: Some(body),
+                info,
+            } => {
+                let body = <Option<CTerm>>::from(*body)?;
+
+                Some(CTerm::Abs {
+                    var,
+                    body: Box::new(body),
+                    info,
+                })
+            }
+            RTerm::App {
+                rator: Some(rator),
+                rand: Some(rand),
+                info,
+            } => {
+                let rator = <Option<CTerm>>::from(*rator)?;
+                let rand = <Option<CTerm>>::from(*rand)?;
+
+                Some(CTerm::App {
+                    rator: Box::new(rator),
+                    rand: Box::new(rand),
+                    info,
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+// May need to use an Rc here for NbE
+#[derive(Debug)]
+pub enum CoreTerm {
+    Index {
+        index: usize,
+        info: SourceInfo,
+    },
+    Abs {
+        var: Name,
+        body: Box<CoreTerm>,
+        info: SourceInfo,
+    },
+    App {
+        rator: Box<CoreTerm>,
+        rand: Box<CoreTerm>,
+        info: SourceInfo,
+    },
 }

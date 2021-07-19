@@ -64,7 +64,7 @@ pub enum Term {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Name {
     pub text: Rc<String>,
     pub info: SourceInfo,
