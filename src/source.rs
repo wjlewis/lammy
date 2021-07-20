@@ -54,6 +54,13 @@ impl Span {
     pub fn new(start: usize, end: usize) -> Self {
         Span { start, end }
     }
+
+    pub fn combine_with(self, other: Self) -> Self {
+        let start = usize::min(self.start, other.start);
+        let end = usize::max(self.end, other.end);
+
+        Span::new(start, end)
+    }
 }
 
 impl fmt::Debug for Span {

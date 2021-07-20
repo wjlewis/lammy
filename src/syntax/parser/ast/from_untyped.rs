@@ -1,6 +1,12 @@
+//! # Conversions from `UntypedTree`s to abstract syntax trees.
+//!
+//! The trait implementations in this file need to conspire with the parsing
+//! functions defined in `../tree_builder.rs` to produce the expected output.
+//! Any panics here are the result of a breached contract between the two.
+
 use super::super::untyped_tree::{SyntaxKind as Sk, UntypedTree};
-use super::{Def, Filepath, Import, ImportAliases, Module, Name, ReplInput, Term};
-use crate::syntax::lexer::Token;
+use super::{Def, Filepath, Import, Module, Name, ReplInput, Term};
+use crate::syntax::tokens::Token;
 
 use UntypedTree::*;
 
@@ -41,7 +47,7 @@ impl From<UntypedTree> for Module {
         match tree {
             Inner {
                 kind: Sk::Module,
-                info,
+                span,
                 children,
             } => {
                 let (imports, defs): (Vec<UntypedTree>, Vec<UntypedTree>) =
@@ -60,7 +66,7 @@ impl From<UntypedTree> for Module {
                 Module {
                     imports: imports.unwrap_or(Vec::new()),
                     defs: defs.unwrap_or(Vec::new()),
-                    info,
+                    span,
                 }
             }
             Inner { kind, .. } => panic!(
@@ -77,7 +83,7 @@ impl From<UntypedTree> for Option<Import> {
         match tree {
             Inner {
                 kind: Sk::Import,
-                info,
+                span,
                 children,
             } => {
                 let mut children: Vec<UntypedTree> = skip_concrete(children).collect();
@@ -86,13 +92,13 @@ impl From<UntypedTree> for Option<Import> {
                 let filepath = children.pop();
                 let aliases = children.pop();
 
-                let aliases = aliases.and_then(<Option<ImportAliases>>::from);
+                let aliases = aliases.map(<Vec<Name>>::from).unwrap_or(Vec::new());
                 let filepath = filepath.and_then(<Option<Filepath>>::from);
 
                 Some(Import {
                     aliases,
                     filepath,
-                    info,
+                    span,
                 })
             }
             _ => None,
@@ -105,7 +111,7 @@ impl From<UntypedTree> for Option<Def> {
         match tree {
             Inner {
                 kind: Sk::Def,
-                info,
+                span,
                 children,
             } => {
                 let mut children: Vec<UntypedTree> = skip_concrete(children).collect();
@@ -117,24 +123,7 @@ impl From<UntypedTree> for Option<Def> {
                 let alias = alias.and_then(<Option<Name>>::from);
                 let body = body.and_then(<Option<Term>>::from);
 
-                Some(Def { alias, body, info })
-            }
-            _ => None,
-        }
-    }
-}
-
-impl From<UntypedTree> for Option<ImportAliases> {
-    fn from(tree: UntypedTree) -> Option<ImportAliases> {
-        match tree {
-            Inner {
-                kind: Sk::ImportAliases,
-                info,
-                children,
-            } => {
-                let aliases: Option<Vec<Name>> =
-                    skip_concrete(children).map(<Option<Name>>::from).collect();
-                aliases.map(|aliases| ImportAliases { aliases, info })
+                Some(Def { alias, body, span })
             }
             _ => None,
         }
@@ -145,7 +134,7 @@ impl From<UntypedTree> for Option<Name> {
     fn from(tree: UntypedTree) -> Option<Name> {
         if let Inner {
             kind,
-            info,
+            span,
             mut children,
         } = tree
         {
@@ -153,8 +142,8 @@ impl From<UntypedTree> for Option<Name> {
                 Sk::Name | Sk::BadName => match children.pop() {
                     Some(Leaf(Token { text, .. })) => Some(Name {
                         text,
-                        info,
-                        ok: kind == Sk::Name,
+                        span,
+                        bad: kind == Sk::BadName,
                     }),
                     _ => None,
                 },
@@ -171,10 +160,10 @@ impl From<UntypedTree> for Option<Filepath> {
         match tree {
             Inner {
                 kind: Sk::ImportFilepath,
-                info,
+                span,
                 mut children,
             } => match children.pop() {
-                Some(Leaf(Token { text, .. })) => Some(Filepath { text, info }),
+                Some(Leaf(Token { text, .. })) => Some(Filepath { text, span }),
                 _ => None,
             },
             _ => None,
@@ -187,7 +176,7 @@ impl From<UntypedTree> for Option<Term> {
         match tree {
             Inner {
                 kind: Sk::Tms,
-                info,
+                span,
                 children,
             } => {
                 let mut children: Vec<UntypedTree> = skip_concrete(children).collect();
@@ -196,13 +185,19 @@ impl From<UntypedTree> for Option<Term> {
                     0 => None,
                     1 => children.pop().and_then(UntypedTree::to_term),
                     _ => {
-                        let rator = children.remove(0).to_term().map(Box::new);
+                        let rator = children
+                            .remove(0)
+                            .to_term()
+                            .map(Box::new)
+                            .expect("parsed application doesn't include operator term");
+
                         let rands = children
                             .into_iter()
                             .map(UntypedTree::to_term)
                             .collect::<Option<Vec<Term>>>()
                             .unwrap_or(Vec::new());
-                        Some(Term::App { rator, rands, info })
+
+                        Some(Term::App { rator, rands, span })
                     }
                 }
             }
@@ -216,15 +211,15 @@ impl UntypedTree {
         match self {
             Inner {
                 kind,
-                info,
+                span,
                 mut children,
             } => match kind {
                 Sk::Var => match children.pop() {
-                    Some(Leaf(Token { text, .. })) => Some(Term::Var { text, info }),
+                    Some(Leaf(Token { text, .. })) => Some(Term::Var { text, span }),
                     _ => None,
                 },
                 Sk::Alias => match children.pop() {
-                    Some(Leaf(Token { text, .. })) => Some(Term::Alias { text, info }),
+                    Some(Leaf(Token { text, .. })) => Some(Term::Alias { text, span }),
                     _ => None,
                 },
                 Sk::Abs => {
@@ -237,12 +232,12 @@ impl UntypedTree {
                     let body = body.and_then(<Option<Term>>::from).map(Box::new);
                     let vars = vars.map(<Vec<Name>>::from).unwrap_or(Vec::new());
 
-                    Some(Term::Abs { vars, body, info })
+                    Some(Term::Abs { vars, body, span })
                 }
                 Sk::Tms => {
                     let terms = Inner {
                         kind,
-                        info,
+                        span,
                         children,
                     };
                     <Option<Term>>::from(terms)
@@ -277,8 +272,8 @@ impl From<UntypedTree> for Vec<Name> {
         match tree {
             Inner {
                 kind: Sk::AbsVars,
-                info,
                 children,
+                ..
             } => {
                 let names: Option<Vec<Name>> =
                     skip_concrete(children).map(<Option<Name>>::from).collect();
@@ -289,6 +284,7 @@ impl From<UntypedTree> for Vec<Name> {
     }
 }
 
+/// Skips unimportant leaf nodes, leaving an iterator over the important ones.
 fn skip_concrete(children: Vec<UntypedTree>) -> impl Iterator<Item = UntypedTree> {
     children.into_iter().filter(|child| !child.is_leaf())
 }

@@ -1,16 +1,16 @@
-use crate::source::SourceInfo;
+use crate::source::Span;
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Token {
     pub kind: TokenKind,
     pub text: Rc<String>,
-    pub info: SourceInfo,
+    pub span: Span,
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, text: Rc<String>, info: SourceInfo) -> Self {
-        Token { kind, text, info }
+    pub fn new(kind: TokenKind, text: Rc<String>, span: Span) -> Self {
+        Token { kind, text, span }
     }
 
     pub fn is_trivial(&self) -> bool {

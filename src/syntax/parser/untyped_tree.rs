@@ -1,11 +1,12 @@
-use crate::source::SourceInfo;
-use crate::syntax::lexer::Token;
+use crate::source::Span;
+use crate::syntax::tokens::Token;
 use std::fmt;
 
+/// A homogeneous (e.g. untyped) tree.
 pub enum UntypedTree {
     Inner {
         kind: SyntaxKind,
-        info: SourceInfo,
+        span: Span,
         children: Vec<UntypedTree>,
     },
     Leaf(Token),
@@ -18,6 +19,7 @@ impl fmt::Debug for UntypedTree {
 }
 
 impl UntypedTree {
+    /// Tests if this tree is a `Leaf` node.
     pub fn is_leaf(&self) -> bool {
         match self {
             Self::Leaf(..) => true,
@@ -25,6 +27,7 @@ impl UntypedTree {
         }
     }
 
+    /// Tests if this tree is an `Inner` node with the provided `SyntaxKind`.
     pub fn has_kind(&self, kind: &SyntaxKind) -> bool {
         match self {
             Self::Inner { kind: my_kind, .. } if my_kind == kind => true,
@@ -38,16 +41,20 @@ impl UntypedTree {
         match self {
             UntypedTree::Inner {
                 kind,
-                info,
+                span,
                 children,
             } => {
-                writeln!(f, "{:?}@{:?}", kind, info)?;
+                writeln!(f, "{:?}@{:?}", kind, span)?;
                 for child in children {
                     child.fmt_debug(f, level + 1)?;
                 }
                 Ok(())
             }
-            UntypedTree::Leaf(Token { kind, text, info }) => {
+            UntypedTree::Leaf(Token {
+                kind,
+                text,
+                span: info,
+            }) => {
                 writeln!(f, r#"{:?}("{}")@{:?}"#, kind, text, info)
             }
         }
@@ -62,6 +69,9 @@ impl UntypedTree {
     }
 }
 
+/// The possible types that a tree (specifically, an `Inner` node) might have.
+/// These are intended to demarcate the important parts of syntax that will
+/// later be extracted into a struct.
 #[derive(Debug, PartialEq)]
 pub enum SyntaxKind {
     ReplInput,
@@ -77,5 +87,5 @@ pub enum SyntaxKind {
     AbsVars,
     Name,
     BadName,
-    Dummy,
+    Missing,
 }
