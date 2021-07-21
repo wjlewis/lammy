@@ -1,5 +1,3 @@
-//! # Abstract syntax trees
-
 mod from_untyped;
 
 use crate::source::Span;
@@ -12,6 +10,7 @@ pub enum ReplInput {
     Def(Def),
     /// A term to reduce, e.g. `(x => x x) x => x x`.
     Term(Term),
+    Unknown,
 }
 
 /// A module (file).

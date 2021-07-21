@@ -7,10 +7,14 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::str::Chars;
 
+/// Produces tokens from an input string slice on demand. Interns token text,
+/// and permits arbitrary lookaheads.
 pub struct Lexer<'a> {
+    /// The source string
     source: &'a str,
     chars: Chars<'a>,
     interner: Interner<'a>,
+    /// A collection of already peeked tokens.
     peeked: VecDeque<Token>,
 }
 
@@ -26,6 +30,8 @@ impl<'a> From<&'a str> for Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    /// Returns the next token from the source text. Note that this token may
+    /// have already been peeked.
     pub fn pop(&mut self) -> Token {
         match self.peeked.pop_front() {
             Some(next) => next,
@@ -33,6 +39,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Returns a reference to the next token to be popped. `peek` is
+    /// idempotent: subsequent calls to `peek` produce the same value
+    /// as the first call.
     pub fn peek(&mut self) -> &Token {
         if self.peeked.is_empty() {
             let next = self.read_next();
@@ -42,6 +51,8 @@ impl<'a> Lexer<'a> {
         self.peeked.get(0).unwrap()
     }
 
+    /// Returns a reference to the `n`th token to be popped. Like `peek`,
+    /// `peek_ahead` is idempotent.
     pub fn peek_ahead(&mut self, n: usize) -> &Token {
         if let Some(need_to_peek) = n.checked_sub(self.peeked.len()) {
             for _ in 0..=need_to_peek {
@@ -123,7 +134,7 @@ impl<'a> Lexer<'a> {
 
     fn read_name(&mut self) -> Tk {
         self.eat_while(Self::is_name_continue);
-        Tk::Name
+        Tk::Var
     }
 
     fn read_alias(&mut self) -> Tk {
@@ -192,7 +203,7 @@ impl<'a> Lexer<'a> {
 
     fn is_unknown(c: char) -> bool {
         match c {
-            '(' | ')' | '{' | '}' | ',' | ';' | '=' | '\\' | '-' | '#' => false,
+            '(' | ')' | '{' | '}' | ',' | ';' | '=' | '\\' | '#' => false,
             '\n' | '\r' => false,
             c if Self::is_name_start(c) => false,
             c if Self::is_alias_start(c) => false,
@@ -211,5 +222,152 @@ impl<'a> Lexer<'a> {
             _ => end,
         };
         self.interner.intern(&self.source[start..end])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use Tk::*;
+
+    impl<'a> Iterator for Lexer<'a> {
+        type Item = Token;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let popped = self.pop();
+            match popped.kind {
+                Tk::Eof => None,
+                _ => Some(popped),
+            }
+        }
+    }
+
+    impl<'a> Lexer<'a> {
+        fn collect_kinds(self) -> Vec<Tk> {
+            self.into_iter().map(|t| t.kind).collect()
+        }
+    }
+
+    #[test]
+    fn peek_is_idempotent() {
+        let mut l = Lexer::from("test=>");
+
+        let peek_kind = l.peek().kind;
+        assert_eq!(peek_kind, Var);
+        assert_eq!(l.peek().kind, peek_kind);
+    }
+
+    #[test]
+    fn peek_ahead_is_idempotent() {
+        let mut l = Lexer::from("first second third");
+
+        let second_peek_kind = l.peek_ahead(2).kind;
+        assert_eq!(second_peek_kind, Var);
+        assert_eq!(l.peek_ahead(2).kind, second_peek_kind);
+    }
+
+    #[test]
+    fn correctly_assigns_text_and_spans() {
+        let mut l = Lexer::from("var Alias\t=>");
+        //                       0123456789 012
+
+        let next = l.pop();
+        assert_eq!(*next.text, "var");
+        assert_eq!(next.span, Span::new(0, 3));
+
+        let next = l.pop();
+        assert_eq!(*next.text, " ");
+        assert_eq!(next.span, Span::new(3, 4));
+
+        let next = l.pop();
+        assert_eq!(*next.text, "Alias");
+        assert_eq!(next.span, Span::new(4, 9));
+
+        let next = l.pop();
+        assert_eq!(*next.text, "\t");
+        assert_eq!(next.span, Span::new(9, 10));
+
+        let next = l.pop();
+        assert_eq!(*next.text, "=>");
+        assert_eq!(next.span, Span::new(10, 12));
+    }
+
+    #[test]
+    fn correctly_assigns_non_ascii_spans() {
+        let mut l = Lexer::from("τϵστ");
+        //                       02468
+
+        let next = l.pop();
+        assert_eq!(*next.text, "τϵστ");
+        assert_eq!(next.span, Span::new(0, 8));
+    }
+
+    #[test]
+    fn correctly_distinguishes_equals_from_arrow() {
+        let l = Lexer::from("=var=>Alias");
+
+        assert_eq!(l.collect_kinds(), vec![Equals, Var, Arrow, Alias]);
+    }
+
+    #[test]
+    fn reads_unterminated_strings() {
+        let l = Lexer::from(
+            r#""unterminated string
+var Alias"#,
+        );
+
+        assert_eq!(
+            l.collect_kinds(),
+            vec![UnterminatedString, Whitespace, Var, Whitespace, Alias]
+        );
+    }
+
+    #[test]
+    fn reads_unknown_tokens() {
+        let l = Lexer::from("**-^^%<>:: unknown");
+
+        assert_eq!(l.collect_kinds(), vec![Unknown, Whitespace, Var]);
+    }
+
+    #[test]
+    fn passes_smoke_test_1() {
+        let l = Lexer::from("(x, y) => x");
+
+        assert_eq!(
+            l.collect_kinds(),
+            vec![LParen, Var, Comma, Whitespace, Var, RParen, Whitespace, Arrow, Whitespace, Var,]
+        );
+    }
+
+    #[test]
+    fn passes_smoke_test_2() {
+        let l = Lexer::from("Id = x => x;");
+
+        assert_eq!(
+            l.collect_kinds(),
+            vec![
+                Alias, Whitespace, Equals, Whitespace, Var, Whitespace, Arrow, Whitespace, Var,
+                Semi
+            ]
+        );
+    }
+
+    #[test]
+    fn passes_smoke_test_3() {
+        let l = Lexer::from(
+            r#"import {} from "./common";
+# My first comment
+Quux = foo bar;
+"#,
+        );
+
+        assert_eq!(
+            l.collect_kinds(),
+            vec![
+                Var, Whitespace, LBrace, RBrace, Whitespace, Var, Whitespace, String, Semi,
+                Whitespace, Comment, Whitespace, Alias, Whitespace, Equals, Whitespace, Var,
+                Whitespace, Var, Semi, Whitespace
+            ]
+        );
     }
 }

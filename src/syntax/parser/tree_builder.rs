@@ -1,6 +1,7 @@
 //! A parser that produces untyped, full-fidelity trees.
 
 use super::untyped_tree::{SyntaxKind as Sk, UntypedTree};
+use super::ParseResult;
 use crate::errors::SimpleError;
 use crate::source::Span;
 use crate::syntax::lexer::Lexer;
@@ -23,25 +24,16 @@ pub struct TreeBuilder<'a> {
     pos: usize,
 }
 
-/// The result of parsing a construct.
-/// Note that parsing always succeeds in producing _some_ tree; if the tree is
-/// incomplete/incorrect, errors will be returned as well.
-#[derive(Debug)]
-pub struct ParseResult {
-    pub tree: UntypedTree,
-    pub errors: Vec<SimpleError>,
-}
-
 impl<'a> TreeBuilder<'a> {
     /// Parses input to the REPL (e.g. definitions, terms, special commands).
-    pub fn parse_repl_input(source: &'a str) -> ParseResult {
+    pub fn parse_repl_input(source: &'a str) -> ParseResult<UntypedTree> {
         let mut builder = TreeBuilder::from(source);
         builder._parse_repl_input();
         builder.take()
     }
 
     /// Parses a module (file).
-    pub fn parse_module(source: &'a str) -> ParseResult {
+    pub fn parse_module(source: &'a str) -> ParseResult<UntypedTree> {
         let mut builder = TreeBuilder::from(source);
         builder._parse_module();
         builder.take()
@@ -54,9 +46,9 @@ impl<'a> TreeBuilder<'a> {
         let kind = peek.kind;
         let span = peek.span.clone();
         match kind {
-            Tk::Alias | Tk::Name if self.starts_def() => self.parse_def(),
+            Tk::Alias | Tk::Var if self.starts_def() => self.parse_def(),
             Tk::Equals => self.parse_def(),
-            Tk::Name | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => self.parse_tms(),
+            Tk::Var | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => self.parse_tms(),
             _ => self.error("expected a definition or term before this", span),
         }
 
@@ -86,11 +78,11 @@ impl<'a> TreeBuilder<'a> {
             let span = peek.span.clone();
             match kind {
                 Tk::Eof => break,
-                Tk::Name if *peek.text == "import" => self.parse_import(),
+                Tk::Var if *peek.text == "import" => self.parse_import(),
                 Tk::LBrace | Tk::RBrace | Tk::String | Tk::UnterminatedString => {
                     self.parse_import()
                 }
-                Tk::Alias | Tk::Name if self.starts_def() => self.parse_def(),
+                Tk::Alias | Tk::Var if self.starts_def() => self.parse_def(),
                 Tk::Equals => self.parse_def(),
                 Tk::Semi => self.error("extraneous ';'", span),
                 _ => {
@@ -137,7 +129,7 @@ impl<'a> TreeBuilder<'a> {
 
     fn parse_def(&mut self) {
         debug_assert!(match self.tokens.peek().kind {
-            Tk::Alias | Tk::Name | Tk::Equals => true,
+            Tk::Alias | Tk::Var | Tk::Equals => true,
             _ => false,
         });
 
@@ -150,7 +142,7 @@ impl<'a> TreeBuilder<'a> {
                 self.pop_leaf();
                 self.close(Sk::Name);
             }
-            Tk::Name => {
+            Tk::Var => {
                 let span = peek.span.clone();
                 self.error("expected an alias, not a var", span);
                 self.open(Sk::BadName);
@@ -169,7 +161,7 @@ impl<'a> TreeBuilder<'a> {
         let peek = self.tokens.peek();
         match peek.kind {
             Tk::Equals => self.pop_leaf(),
-            Tk::Name | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => {
+            Tk::Var | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => {
                 let span = peek.span.clone();
                 self.error("expected an '=' before this", span);
             }
@@ -189,7 +181,7 @@ impl<'a> TreeBuilder<'a> {
 
     fn parse_import(&mut self) {
         debug_assert!(match self.tokens.peek().kind {
-            Tk::Name | Tk::LBrace | Tk::RBrace | Tk::String | Tk::UnterminatedString => true,
+            Tk::Var | Tk::LBrace | Tk::RBrace | Tk::String | Tk::UnterminatedString => true,
             _ => false,
         });
 
@@ -197,10 +189,10 @@ impl<'a> TreeBuilder<'a> {
 
         let peek = self.tokens.peek();
         match peek.kind {
-            Tk::Name if *peek.text == "import" => self.pop_leaf(),
+            Tk::Var if *peek.text == "import" => self.pop_leaf(),
             Tk::LBrace
             | Tk::Alias
-            | Tk::Name
+            | Tk::Var
             | Tk::Comma
             | Tk::RBrace
             | Tk::String
@@ -217,7 +209,7 @@ impl<'a> TreeBuilder<'a> {
         self.skip_trivia();
         let peek = self.tokens.peek();
         match peek.kind {
-            Tk::Name if *peek.text == "from" => self.pop_leaf(),
+            Tk::Var if *peek.text == "from" => self.pop_leaf(),
             Tk::String | Tk::UnterminatedString => {
                 let span = peek.span.clone();
                 self.error("expected 'from' before this", span);
@@ -268,7 +260,7 @@ impl<'a> TreeBuilder<'a> {
                 self.open(Sk::ImportAliases);
                 self.pop_leaf();
             }
-            Tk::Alias | Tk::Name | Tk::Comma | Tk::RBrace => {
+            Tk::Alias | Tk::Var | Tk::Comma | Tk::RBrace => {
                 self.open(Sk::ImportAliases);
                 self.error("expected a '{' before this", span);
             }
@@ -291,7 +283,7 @@ impl<'a> TreeBuilder<'a> {
                     self.pop_leaf();
                     self.close(Sk::Name);
                 }
-                Tk::Name => {
+                Tk::Var => {
                     let span = peek.span.clone();
                     self.error("expected an alias here, not a name", span);
                     self.open(Sk::BadName);
@@ -321,7 +313,7 @@ impl<'a> TreeBuilder<'a> {
                     self.pop_leaf();
                     break;
                 }
-                Tk::Alias | Tk::Name => {
+                Tk::Alias | Tk::Var => {
                     let span = peek.span.clone();
                     self.error("expected a ',' before this", span);
                 }
@@ -345,7 +337,7 @@ impl<'a> TreeBuilder<'a> {
             self.skip_trivia();
             let peek = self.tokens.peek();
             match peek.kind {
-                Tk::Name | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => self.parse_tm(),
+                Tk::Var | Tk::Alias | Tk::LParen | Tk::Comma | Tk::Arrow => self.parse_tm(),
                 _ => break,
             }
         }
@@ -358,8 +350,8 @@ impl<'a> TreeBuilder<'a> {
         let peek = self.tokens.peek();
         let span = peek.span.clone();
         match peek.kind.clone() {
-            Tk::Name if self.starts_single_abs() => self.parse_single_abs(),
-            Tk::Name => self.parse_name(),
+            Tk::Var if self.starts_single_abs() => self.parse_single_abs(),
+            Tk::Var => self.parse_name(),
             Tk::Alias => self.parse_alias(),
             Tk::LParen if self.starts_abs_names() => self.parse_multi_abs(),
             Tk::LParen => self.parse_parend(),
@@ -370,7 +362,7 @@ impl<'a> TreeBuilder<'a> {
     }
 
     fn parse_single_abs(&mut self) {
-        debug_assert!(self.tokens.peek().kind == Tk::Name);
+        debug_assert!(self.tokens.peek().kind == Tk::Var);
         self.open(Sk::Abs);
         self.open(Sk::AbsVars);
         self.open(Sk::Name);
@@ -422,7 +414,7 @@ impl<'a> TreeBuilder<'a> {
         let peek = self.tokens.peek();
         match peek.kind {
             Tk::Arrow => self.pop_leaf(),
-            Tk::Name | Tk::Alias | Tk::LParen | Tk::Comma => {
+            Tk::Var | Tk::Alias | Tk::LParen | Tk::Comma => {
                 let span = peek.span.clone();
                 self.error("expected an '=>' before this", span);
             }
@@ -460,7 +452,7 @@ impl<'a> TreeBuilder<'a> {
             self.skip_trivia();
             let peek = self.tokens.peek();
             match peek.kind {
-                Tk::Name => {
+                Tk::Var => {
                     self.open(Sk::Name);
                     self.pop_leaf();
                     self.close(Sk::Name);
@@ -504,7 +496,7 @@ impl<'a> TreeBuilder<'a> {
                     self.pop_leaf();
                     break;
                 }
-                Tk::Name | Tk::Alias => {
+                Tk::Var | Tk::Alias => {
                     let span = peek.span.clone();
                     self.error("expected a ',' before this", span);
                 }
@@ -520,7 +512,7 @@ impl<'a> TreeBuilder<'a> {
     }
 
     fn parse_name(&mut self) {
-        debug_assert!(self.tokens.peek().kind == Tk::Name);
+        debug_assert!(self.tokens.peek().kind == Tk::Var);
         self.open(Sk::Var);
         self.pop_leaf();
         self.close(Sk::Var);
@@ -550,7 +542,7 @@ impl<'a> TreeBuilder<'a> {
     }
 
     fn starts_single_abs(&mut self) -> bool {
-        debug_assert!(self.tokens.peek().kind == Tk::Name);
+        debug_assert!(self.tokens.peek().kind == Tk::Var);
 
         let mut peek_cursor = 1;
         loop {
@@ -568,12 +560,24 @@ impl<'a> TreeBuilder<'a> {
         debug_assert!(self.tokens.peek().kind == Tk::LParen);
 
         let mut peek_cursor = 1;
+        let mut name_count = 0;
         loop {
             let peek = self.tokens.peek_ahead(peek_cursor);
             match peek.kind {
                 _ if peek.is_trivial() => {}
-                Tk::Name | Tk::Alias => {}
-                Tk::Comma | Tk::Arrow => break true,
+                Tk::Var | Tk::Alias => {
+                    name_count += 1;
+                }
+                Tk::Comma => break true,
+                Tk::Arrow => {
+                    // If we've only seen a single name and no ')', then the
+                    // leading '(' is the start of an application.
+                    if name_count == 1 {
+                        break false;
+                    } else {
+                        break true;
+                    }
+                }
                 Tk::RParen => {
                     peek_cursor += 1;
                     loop {
@@ -594,7 +598,7 @@ impl<'a> TreeBuilder<'a> {
 
     fn starts_def(&mut self) -> bool {
         debug_assert!(match self.tokens.peek().kind {
-            Tk::Alias | Tk::Name => true,
+            Tk::Alias | Tk::Var => true,
             _ => false,
         });
 
@@ -681,7 +685,7 @@ impl<'a> TreeBuilder<'a> {
         self.close(Sk::Missing);
     }
 
-    /// Extracts a `ParseResult` from this builder.
+    /// Extracts a `ParseResult<UntypedTree>` from this builder.
     ///
     /// # Panics
     ///
@@ -689,14 +693,14 @@ impl<'a> TreeBuilder<'a> {
     /// 1. No tree has been started.
     /// 2. The `open` method has been called without a corresponding call to `close`.
     /// 3. Multiple toplevel trees have been created.
-    pub fn take(mut self) -> ParseResult {
+    pub fn take(mut self) -> ParseResult<UntypedTree> {
         match self.wip.pop() {
             None => panic!("no tree to take"),
             Some(Entry::InProgress { kind, .. }) => panic!("unmatched `open` ({:?})", kind),
             Some(Entry::Complete(tree)) => {
                 if self.wip.is_empty() {
                     ParseResult {
-                        tree,
+                        result: tree,
                         errors: self.errors,
                     }
                 } else {
@@ -787,10 +791,10 @@ mod tests {
 
     #[test]
     fn parses_valid_repl_def_correctly() {
-        let ParseResult { tree, errors } = TreeBuilder::parse_repl_input("Id = x => x");
+        let ParseResult { result, errors } = TreeBuilder::parse_repl_input("Id = x => x");
 
         assert!(errors.is_empty());
-        let tree = KindTree::from(tree);
+        let tree = KindTree::from(result);
         let expected = r#"ReplInput
   Def
     Name
@@ -824,6 +828,12 @@ mod tests {
 
         let mut builder = TreeBuilder::from("several names =>");
         assert_eq!(builder.starts_single_abs(), false);
+    }
+
+    #[test]
+    fn single_abs_enclosed_in_parens_is_parsed_correctly() {
+        let mut builder = TreeBuilder::from("(x => x)");
+        assert_eq!(builder.starts_abs_names(), false);
     }
 
     #[test]

@@ -6,18 +6,6 @@ pub trait Error: fmt::Debug {
 }
 
 #[derive(Debug)]
-pub struct WithErrors<T> {
-    pub result: T,
-    pub errors: Vec<Box<dyn Error>>,
-}
-
-impl<T> WithErrors<T> {
-    pub fn new(result: T, errors: Vec<Box<dyn Error>>) -> Self {
-        Self { result, errors }
-    }
-}
-
-#[derive(Debug)]
 pub struct SimpleError {
     message: String,
     span: Span,

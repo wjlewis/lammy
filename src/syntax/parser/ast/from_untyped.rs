@@ -1,4 +1,4 @@
-//! # Conversions from `UntypedTree`s to abstract syntax trees.
+//! ## Conversions from `UntypedTree`s to abstract syntax trees.
 //!
 //! The trait implementations in this file need to conspire with the parsing
 //! functions defined in `../tree_builder.rs` to produce the expected output.
@@ -10,8 +10,8 @@ use crate::syntax::tokens::Token;
 
 use UntypedTree::*;
 
-impl From<UntypedTree> for Option<ReplInput> {
-    fn from(tree: UntypedTree) -> Option<ReplInput> {
+impl From<UntypedTree> for ReplInput {
+    fn from(tree: UntypedTree) -> ReplInput {
         match tree {
             Inner {
                 kind: Sk::ReplInput,
@@ -20,16 +20,20 @@ impl From<UntypedTree> for Option<ReplInput> {
             } => {
                 let mut children: Vec<UntypedTree> = skip_concrete(children).collect();
 
-                let input = children.pop()?;
-                if input.has_kind(&Sk::Def) {
-                    let def: Option<Def> = input.into();
-                    def.map(ReplInput::Def)
-                } else if input.has_kind(&Sk::Tms) {
-                    let term: Option<Term> = input.into();
-                    term.map(ReplInput::Term)
-                } else {
-                    None
-                }
+                children
+                    .pop()
+                    .and_then(|input| {
+                        if input.has_kind(&Sk::Def) {
+                            let def: Option<Def> = input.into();
+                            def.map(ReplInput::Def)
+                        } else if input.has_kind(&Sk::Tms) {
+                            let term: Option<Term> = input.into();
+                            term.map(ReplInput::Term)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(ReplInput::Unknown)
             }
             Inner { kind, .. } => panic!(
                 "encountered untyped tree of kind {:?} when extracting repl input",

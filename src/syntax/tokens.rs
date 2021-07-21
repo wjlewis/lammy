@@ -1,7 +1,7 @@
 use crate::source::Span;
 use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub text: Rc<String>,
@@ -32,7 +32,7 @@ pub enum TokenKind {
     Semi,               // ;
     Equals,             // =
     Arrow,              // =>
-    Name,               // [a-z][a-zA-Z0-9*+']*
+    Var,                // [a-z][a-zA-Z0-9*+']*
     Alias,              // [A-Z][a-zA-Z0-9*+']*
     String,             // ".."
     UnterminatedString, // "..
